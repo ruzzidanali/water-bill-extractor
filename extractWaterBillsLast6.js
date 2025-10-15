@@ -147,6 +147,9 @@ async function pdfToPNG(pdfPath) {
   const outPrefix = path.join(debugDir, base);
   const rawPngPath = `${outPrefix}_raw.png`;
   const resizedPngPath = `${outPrefix}.png`;
+  const meta = await sharp(rawPngPath).metadata();
+  console.log("🧾 Render PDF image dimensions:", meta.width, "x", meta.height);
+
 
   try {
     execSync(`pdftoppm -r 300 -singlefile -png "${pdfPath.replace(/\\/g, "/")}" "${outPrefix.replace(/\\/g, "/")}_raw"`);
