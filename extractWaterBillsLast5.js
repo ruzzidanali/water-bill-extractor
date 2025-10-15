@@ -5,6 +5,8 @@ import sharp from "sharp";
 import { createWorker } from "tesseract.js";
 import * as pdfjsLibRaw from "pdfjs-dist/legacy/build/pdf.js";
 import { fileURLToPath } from "url";
+import { createCanvas } from "canvas";
+import { getDocument } from "pdfjs-dist";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -142,17 +144,46 @@ async function runOCRText(pdfPath) {
 /* --------------------------------------------------
    4️⃣ Convert PDF → Normalized PNG (2481x3509)
 -------------------------------------------------- */
-function pdfToPNG(pdfPath) {
+// function pdfToPNG(pdfPath) {
+//   const base = path.basename(pdfPath, ".pdf");
+//   const outPrefix = path.join(debugDir, base);
+//   const pngPath = `${outPrefix}.png`;
+//   try {
+//     execSync(`pdftoppm -r 300 -singlefile -png "${pdfPath}" "${outPrefix}"`);
+//     execSync(`magick "${pngPath}" -resize ${designWidth}x${designHeight}! "${pngPath}"`);
+//   } catch (err) {
+//     console.error("❌ PDF→PNG conversion failed:", err.message);
+//   }
+//   return pngPath;
+// }
+
+async function pdfToPNG(pdfPath) {
   const base = path.basename(pdfPath, ".pdf");
-  const outPrefix = path.join(debugDir, base);
-  const pngPath = `${outPrefix}.png`;
+  const outPath = path.join(debugDir, `${base}.png`);
+
   try {
-    execSync(`pdftoppm -r 300 -singlefile -png "${pdfPath}" "${outPrefix}"`);
-    execSync(`magick "${pngPath}" -resize ${designWidth}x${designHeight}! "${pngPath}"`);
+    const data = new Uint8Array(fs.readFileSync(pdfPath));
+    const pdf = await getDocument({ data }).promise;
+    const page = await pdf.getPage(1);
+
+    const viewport = page.getViewport({ scale: 3.0 }); // ~300 DPI
+    const canvas = createCanvas(viewport.width, viewport.height);
+    const context = canvas.getContext("2d");
+
+    await page.render({ canvasContext: context, viewport }).promise;
+
+    // normalize to design dimensions
+    const buffer = canvas.toBuffer("image/png");
+    await sharp(buffer)
+      .resize(designWidth, designHeight)
+      .toFile(outPath);
+
+    console.log(`🖼️  Generated PNG → ${outPath}`);
   } catch (err) {
-    console.error("❌ PDF→PNG conversion failed:", err.message);
+    console.error("❌ PDF→PNG (JS) failed:", err.message);
   }
-  return pngPath;
+
+  return outPath;
 }
 
 /* --------------------------------------------------
