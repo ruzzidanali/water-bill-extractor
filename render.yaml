@@ -5,7 +5,8 @@ services:
     region: singapore
     plan: free
     buildCommand: |
-      apt-get update && apt-get install -y poppler-utils
+      apt-get update
+      apt-get install -y poppler-utils imagemagick ghostscript fonts-dejavu-core
       npm install
     startCommand: node server.js
     autoDeploy: true
