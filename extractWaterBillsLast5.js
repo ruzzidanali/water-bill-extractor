@@ -149,8 +149,10 @@ async function pdfToPNG(pdfPath) {
   const finalPath = `${outPrefix}.png`;
 
   try {
-    // Convert PDF → PNG using Poppler
+    // 🧾 Step 1: Convert PDF → PNG (Poppler)
     execSync(`pdftoppm -r 300 -singlefile -png "${pdfPath}" "${outPrefix}"`);
+
+    // 🖼️ Step 2: Resize using Sharp (pure Node, no ImageMagick)
     if (fs.existsSync(tmpPath)) {
       await sharp(tmpPath)
         .resize(designWidth, designHeight)
@@ -166,6 +168,7 @@ async function pdfToPNG(pdfPath) {
 
   return finalPath;
 }
+
 
 
 /* --------------------------------------------------
