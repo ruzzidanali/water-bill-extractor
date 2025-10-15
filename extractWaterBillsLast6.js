@@ -237,7 +237,7 @@ function standardizeOutput(obj) {
 /* --------------------------------------------------
    🧩 Main Template OCR (with Canvas overlay)
 -------------------------------------------------- */
-export async function processTemplateOCR(imagePath, template, fileName, region) {
+async function processTemplateOCR(imagePath, template, fileName, region) {
   const meta = await sharp(imagePath).metadata();
   const scaleX = meta.width / designWidth;
   const scaleY = meta.height / designHeight;
@@ -263,6 +263,7 @@ export async function processTemplateOCR(imagePath, template, fileName, region) 
 
   const addressLines = countAddressLines(addressText);
   const offsetY = -(6 - addressLines) * 50;
+
   const moveKeys = [
     "No. Meter",
     "Bilangan Hari - Start",
@@ -283,8 +284,10 @@ export async function processTemplateOCR(imagePath, template, fileName, region) 
       width: Math.round(box.w * scaleX),
       height: Math.round(box.h * scaleY)
     };
+    // ⬛ Create red rectangle for overlay
     svgRects.push(
-      `<rect x="${s.left}" y="${s.top}" width="${s.width}" height="${s.height}" fill="none" stroke="red" stroke-width="3"/>`
+      `<rect x="${s.left}" y="${s.top}" width="${s.width}" height="${s.height}" 
+         fill="none" stroke="red" stroke-width="4" stroke-opacity="1"/>`
     );
 
     const crop = path.join(cropsDir, `${key.replace(/\s+/g, "_")}.png`);
@@ -292,38 +295,37 @@ export async function processTemplateOCR(imagePath, template, fileName, region) 
       await sharp(imagePath).extract(s).toFile(crop);
       const r = await worker.recognize(crop);
       let text = r.data.text.trim();
-      if (["Bil Semasa", "Jumlah Perlu Dibayar", "Baki Terdahulu", "Cagaran", "Penggunaan (m3)"].includes(key))
+      if (
+        ["Bil Semasa", "Jumlah Perlu Dibayar", "Baki Terdahulu", "Cagaran", "Penggunaan (m3)"].includes(key)
+      )
         text = cleanNumeric(text);
       results[key] = text;
       console.log(`✂️ ${key}: ${results[key]}`);
-    } catch {
+    } catch (e) {
       results[key] = "";
+      console.warn(`⚠️ OCR failed for ${key}: ${e.message}`);
     }
   }
 
   await worker.terminate();
 
-  // 🖍️ Canvas-based overlay drawing
-  const baseImage = await loadImage(imagePath);
-  const canvas = createCanvas(meta.width, meta.height);
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(baseImage, 0, 0, meta.width, meta.height);
-  ctx.strokeStyle = "red";
-  ctx.lineWidth = 3;
-  svgRects.forEach(rect => {
-    const match = rect.match(/x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/);
-    if (match) {
-      const [, x, y, w, h] = match.map(Number);
-      ctx.strokeRect(x, y, w, h);
-    }
-  });
-  const outOverlay = imagePath.replace(".png", "_overlay.png");
-  const out = fs.createWriteStream(outOverlay);
-  const stream = canvas.createPNGStream();
-  stream.pipe(out);
-  out.on("finish", () => console.log(`🖼️ Saved debug overlay → ${outOverlay}`));
+  console.log(`📦 Overlay rectangles: ${svgRects.length}`);
 
-  // 🧮 Tempoh Bil
+  // 🖍️ ✅ Sharp-only SVG overlay (Render-safe)
+  const svgOverlay = `
+    <svg width="${meta.width}" height="${meta.height}" xmlns="http://www.w3.org/2000/svg">
+      ${svgRects.join("\n")}
+    </svg>
+  `;
+
+  const outOverlay = imagePath.replace(".png", "_overlay.png");
+  await sharp(imagePath)
+    .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
+    .toFile(outOverlay);
+
+  console.log(`🖼️ Saved debug overlay → ${outOverlay}`);
+
+  // 🧮 Calculate Tempoh Bil
   const norm = d => {
     const m = d?.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
     if (!m) return null;
@@ -331,6 +333,7 @@ export async function processTemplateOCR(imagePath, template, fileName, region) 
     const yyyy = yy.length === 2 ? "20" + yy : yy;
     return `${dd.padStart(2, "0")}/${mm.padStart(2, "0")}/${yyyy}`;
   };
+
   const start = norm(results["Bilangan Hari - End"]);
   const end = norm(results["Bilangan Hari - Start"]);
   let bilDays = "", tempohBil = "";
@@ -340,6 +343,7 @@ export async function processTemplateOCR(imagePath, template, fileName, region) 
     bilDays = Math.abs(Math.round((d2 - d1) / 86400000)).toString();
     tempohBil = `${start} - ${end}`;
   }
+
   delete results["Bilangan Hari - Start"];
   delete results["Bilangan Hari - End"];
 
@@ -353,10 +357,9 @@ export async function processTemplateOCR(imagePath, template, fileName, region) 
     ...(bilDays ? { "Bilangan Hari": bilDays } : {})
   };
 
-  // 🧭 Region-specific normalization
+  // 🧭 Apply regional post-processors
   if (region.toLowerCase().includes("johor")) {
-    const parsed = parseJohorFields(results);
-    final = { ...final, ...parsed };
+    final = { ...final, ...parseJohorFields(results) };
   } else if (region.toLowerCase().includes("kedah")) {
     const parsed = parseKedahFields(results, fileName);
     if (final["Tempoh Bil"]) parsed["Tempoh Bil"] = final["Tempoh Bil"];
@@ -372,16 +375,19 @@ export async function processTemplateOCR(imagePath, template, fileName, region) 
     delete final["Offset Applied (px)"];
   }
 
+  // Clean account fields
   if (final["No. Bil"])
     final["No. Bil"] = final["No. Bil"].replace(/\s+/g, "").replace(/[^A-Za-z0-9\-]/g, "");
   if (final["No. Akaun"])
     final["No. Akaun"] = final["No. Akaun"].replace(/\s+/g, "").replace(/[^A-Za-z0-9\-]/g, "");
 
+  // ✅ Save standardized JSON
   const standardized = standardizeOutput(final);
   const outJson = path.join(outputDir, `${path.basename(fileName, ".pdf")}_${region}.json`);
   fs.writeFileSync(outJson, JSON.stringify(standardized, null, 2));
   console.log(`✅ Standardized JSON saved → ${outJson}`);
 }
+
 
 /* --------------------------------------------------
    🧩 API Entrypoint
