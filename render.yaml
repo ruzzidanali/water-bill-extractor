@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: water-bill-extractor
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: |
+      apt-get update && apt-get install -y poppler-utils
+      npm install
+    startCommand: node server.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production

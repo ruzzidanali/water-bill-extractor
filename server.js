@@ -2,7 +2,7 @@ import express from "express";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
-import { extractWaterBill } from "./extractWaterBillsLast5.js";
+import { extractWaterBill } from "./extractWaterBillsLast6.js"; // ✅ updated
 
 const app = express();
 const upload = multer({ dest: "uploads/" });
@@ -11,15 +11,12 @@ app.post("/extract", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-    const originalName = req.file.originalname; // ✅ keep original filename
     const filePath = path.resolve(req.file.path);
+    console.log(`📄 Received file: ${req.file.originalname} (${filePath})`);
 
-    console.log(`📄 Received file: ${originalName} (${filePath})`);
+    const result = await extractWaterBill(filePath, req.file.originalname);
 
-    // ✅ Pass both file path and original name to extractor
-    const result = await extractWaterBill(filePath, originalName);
-
-    // Remove temp upload after processing
+    // remove temp file after extraction
     fs.unlinkSync(filePath);
 
     res.json(result);
@@ -29,8 +26,7 @@ app.post("/extract", upload.single("file"), async (req, res) => {
   }
 });
 
-
-app.get("/", (req, res) => res.send("Water Bill Extraction API is running 🚀"));
+app.get("/", (req, res) => res.send("💧 Water Bill Extraction API v6 is running 🚀"));
 
 app.listen(5008, () =>
   console.log("✅ Water Bill API running at http://localhost:5008")

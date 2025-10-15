@@ -711,16 +711,16 @@ export async function extractWaterBill(filePath, originalName = "") {
   }
 }
 
-// // CLI mode (if executed directly)
-// if (import.meta.url === `file://${process.argv[1]}`) {
-//   (async () => {
-//     const pdfs = fs.readdirSync(billsDir).filter(f => f.endsWith(".pdf"));
-//     console.log(`📦 Found ${pdfs.length} bills in ${billsDir}\n`);
-//     for (const file of pdfs) {
-//       console.log(`🧾 Processing: ${file} ...`);
-//       const pdfPath = path.join(billsDir, file);
-//       await extractWaterBill(pdfPath);
-//     }
-//     console.log("🎉 All water bills processed successfully!");
-//   })();
-// }
+// CLI mode (if executed directly)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  (async () => {
+    const pdfs = fs.readdirSync(billsDir).filter(f => f.endsWith(".pdf"));
+    console.log(`📦 Found ${pdfs.length} bills in ${billsDir}\n`);
+    for (const file of pdfs) {
+      console.log(`🧾 Processing: ${file} ...`);
+      const pdfPath = path.join(billsDir, file);
+      await extractWaterBill(pdfPath);
+    }
+    console.log("🎉 All water bills processed successfully!");
+  })();
+}
