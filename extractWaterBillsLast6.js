@@ -147,17 +147,22 @@ async function pdfToPNG(pdfPath) {
   const outPrefix = path.join(debugDir, base);
   const rawPngPath = `${outPrefix}_raw.png`;
   const resizedPngPath = `${outPrefix}.png`;
-  const meta = await sharp(rawPngPath).metadata();
-  console.log("🧾 Render PDF image dimensions:", meta.width, "x", meta.height);
-
 
   try {
-    execSync(`pdftoppm -r 300 -singlefile -png "${pdfPath.replace(/\\/g, "/")}" "${outPrefix.replace(/\\/g, "/")}_raw"`);
+    // 🖼️ Convert PDF → PNG using pdftoppm
+    execSync(
+      `pdftoppm -r 300 -singlefile -png "${pdfPath.replace(/\\/g, "/")}" "${outPrefix.replace(/\\/g, "/")}_raw"`
+    );
 
+    // 🧾 Log actual Render image dimensions
+    const meta = await sharp(rawPngPath).metadata();
+    console.log("🧾 Render PDF image dimensions:", meta.width, "x", meta.height);
+
+    // 🪄 Resize to standard canvas (so template coordinates match)
     await sharp(rawPngPath)
       .resize(designWidth, designHeight, { fit: "fill" })
       .toFile(resizedPngPath);
-    
+
     fs.unlinkSync(rawPngPath);
     return resizedPngPath;
   } catch (err) {
