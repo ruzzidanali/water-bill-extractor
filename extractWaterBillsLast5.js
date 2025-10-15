@@ -1,19 +1,17 @@
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
 import sharp from "sharp";
 import { createWorker } from "tesseract.js";
-import * as pdfjsLibRaw from "pdfjs-dist/legacy/build/pdf.js";
 import { fileURLToPath } from "url";
 import { createCanvas } from "canvas";
-import pdfjsLib from "pdfjs-dist";
+import pdfjsLibRaw from "pdfjs-dist/legacy/build/pdf.js"; // ✅ legacy build
 
+// ✅ Safe single declaration for pdfjsLib and getDocument
+const pdfjsLib = pdfjsLibRaw.default ?? pdfjsLibRaw;
 const { getDocument } = pdfjsLib;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-const pdfjsLib = pdfjsLibRaw.default ?? pdfjsLibRaw;
 
 // ✅ Worker path fix
 if (pdfjsLib.GlobalWorkerOptions) {
