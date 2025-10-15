@@ -165,17 +165,22 @@ async function runOCRText(pdfPath) {
 async function pdfToPNG(pdfPath) {
   const base = path.basename(pdfPath, ".pdf");
   const outPrefix = path.join(debugDir, base);
-  const pngPath = `${outPrefix}.png`;
+  const tmpPath = `${outPrefix}_tmp.png`;
+  const finalPath = `${outPrefix}.png`;
+
   try {
     execSync(`pdftoppm -r 300 -singlefile -png "${pdfPath}" "${outPrefix}"`);
-    await sharp(pngPath)
+    // resize safely using temp file
+    await sharp(tmpPath)
       .resize(designWidth, designHeight)
-      .toFile(pngPath);
-    console.log(`🖼️ Generated PNG → ${pngPath}`);
+      .toFile(finalPath);
+    fs.unlinkSync(tmpPath);
+    console.log(`🖼️ Generated PNG → ${finalPath}`);
   } catch (err) {
     console.error("❌ PDF→PNG conversion failed:", err.message);
   }
-  return pngPath;
+
+  return finalPath;
 }
 
 /* --------------------------------------------------
@@ -722,16 +727,16 @@ export async function extractWaterBill(filePath, originalName = "") {
     return { error: "Unknown region" };
   }
 
-  const png = pdfToPNG(filePath);
-  let imageToUse = png;
-  const regionChecked = await detectSelangorLayout(region, imageToUse);
+  // ✅ ensure await for Promise
+  const png = await pdfToPNG(filePath);
+  const regionChecked = await detectSelangorLayout(region, png);
 
   const templatePath = path.join(templatesDir, `${regionChecked}.json`);
   if (!fs.existsSync(templatePath))
     fs.writeFileSync(templatePath, JSON.stringify({}, null, 2));
 
   const template = JSON.parse(fs.readFileSync(templatePath, "utf8"));
-  await processTemplateOCR(imageToUse, template, fileName, regionChecked);
+  await processTemplateOCR(png, template, fileName, regionChecked);
 
   const outJson = path.join(outputDir, `${path.basename(fileName, ".pdf")}_${regionChecked}.json`);
   if (fs.existsSync(outJson)) {
