@@ -654,41 +654,94 @@ if (region.toLowerCase().includes("kedah")) {
 /* --------------------------------------------------
    8️⃣ Main Runner
 -------------------------------------------------- */
-(async () => {
-  const pdfs = fs.readdirSync(billsDir).filter(f => f.endsWith(".pdf"));
-  console.log(`📦 Found ${pdfs.length} bills in ${billsDir}\n`);
+// (async () => {
+//   const pdfs = fs.readdirSync(billsDir).filter(f => f.endsWith(".pdf"));
+//   console.log(`📦 Found ${pdfs.length} bills in ${billsDir}\n`);
 
-  for (const file of pdfs) {
-    console.log(`🧾 Processing: ${file} ...`);
-    const pdfPath = path.join(billsDir, file);
-    const text = await extractPDFText(pdfPath);
+//   for (const file of pdfs) {
+//     console.log(`🧾 Processing: ${file} ...`);
+//     const pdfPath = path.join(billsDir, file);
+//     const text = await extractPDFText(pdfPath);
 
-    // const debugTextPath = path.join(outputDir, `${path.basename(file, ".pdf")}_fulltext.json`);
-    // fs.writeFileSync(debugTextPath, JSON.stringify({ File: file, FullText: text }, null, 2));
-    // console.log(`🪶 Full OCR text saved → ${debugTextPath}`);
+//     // const debugTextPath = path.join(outputDir, `${path.basename(file, ".pdf")}_fulltext.json`);
+//     // fs.writeFileSync(debugTextPath, JSON.stringify({ File: file, FullText: text }, null, 2));
+//     // console.log(`🪶 Full OCR text saved → ${debugTextPath}`);
 
-    const region = await detectRegionHybrid(pdfPath, text);
-    if (region === "unknown") {
-      console.warn(`⚠️ Unknown region → skipping ${file}`);
-      continue;
-    }
+//     const region = await detectRegionHybrid(pdfPath, text);
+//     if (region === "unknown") {
+//       console.warn(`⚠️ Unknown region → skipping ${file}`);
+//       continue;
+//     }
 
-    const png = await pdfToPNG(pdfPath);
-    let imageToUse = png;
-    // if (region === "Johor") {
-    //   imageToUse = await makeBlackWhiteJohor(png);
-    // }
+//     const png = await pdfToPNG(pdfPath);
+//     let imageToUse = png;
+//     // if (region === "Johor") {
+//     //   imageToUse = await makeBlackWhiteJohor(png);
+//     // }
 
-    const regionChecked = await detectSelangorLayout(region, imageToUse);
+//     const regionChecked = await detectSelangorLayout(region, imageToUse);
 
-    const templatePath = path.join(templatesDir, `${regionChecked}.json`);
-    if (!fs.existsSync(templatePath))
-      fs.writeFileSync(templatePath, JSON.stringify({}, null, 2));
+//     const templatePath = path.join(templatesDir, `${regionChecked}.json`);
+//     if (!fs.existsSync(templatePath))
+//       fs.writeFileSync(templatePath, JSON.stringify({}, null, 2));
 
-    const template = JSON.parse(fs.readFileSync(templatePath, "utf8"));
-    await processTemplateOCR(imageToUse, template, file, regionChecked);
-    console.log(`✅ Completed ${file}\n`);
+//     const template = JSON.parse(fs.readFileSync(templatePath, "utf8"));
+//     await processTemplateOCR(imageToUse, template, file, regionChecked);
+//     console.log(`✅ Completed ${file}\n`);
+//   }
+
+//   console.log("🎉 All water bills processed successfully!");
+// })();
+
+/* --------------------------------------------------
+   8️⃣ Main Runner (supports both CLI & API)
+-------------------------------------------------- */
+
+// ✅ Exported function for API
+export async function extractWaterBill(filePath, originalName = "") {
+  console.log(`🧾 Processing single file via API: ${filePath} ...`);
+  const fileName = originalName || path.basename(filePath);
+  const text = await extractPDFText(filePath);
+
+  const region = await detectRegionHybrid(filePath, text);
+  if (region === "unknown") {
+    console.warn(`⚠️ Unknown region → skipping ${filePath}`);
+    return { error: "Unknown region" };
   }
 
-  console.log("🎉 All water bills processed successfully!");
-})();
+  const png = await pdfToPNG(filePath);
+  const regionChecked = await detectSelangorLayout(region, png);
+
+  const templatePath = path.join(templatesDir, `${regionChecked}.json`);
+  if (!fs.existsSync(templatePath))
+    fs.writeFileSync(templatePath, JSON.stringify({}, null, 2));
+
+  const template = JSON.parse(fs.readFileSync(templatePath, "utf8"));
+  await processTemplateOCR(png, template, fileName, regionChecked);
+
+  const outJson = path.join(outputDir, `${path.basename(fileName, ".pdf")}_${regionChecked}.json`);
+  if (fs.existsSync(outJson)) {
+    const data = JSON.parse(fs.readFileSync(outJson, "utf8"));
+    console.log(`✅ Extraction complete → returning standardized JSON for ${fileName}`);
+    return data;
+  } else {
+    console.warn(`⚠️ Output JSON not found for ${fileName}`);
+    return { error: "No output generated" };
+  }
+}
+
+// ✅ CLI mode: only runs if executed directly (not imported by server.js)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  (async () => {
+    const pdfs = fs.readdirSync(billsDir).filter(f => f.endsWith(".pdf"));
+    console.log(`📦 Found ${pdfs.length} bills in ${billsDir}\n`);
+
+    for (const file of pdfs) {
+      console.log(`🧾 Processing: ${file} ...`);
+      const pdfPath = path.join(billsDir, file);
+      await extractWaterBill(pdfPath);
+    }
+
+    console.log("🎉 All water bills processed successfully!");
+  })();
+}
