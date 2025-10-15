@@ -3,7 +3,7 @@ import path from "path";
 import { execSync } from "child_process";
 import sharp from "sharp";
 import { createWorker } from "tesseract.js";
-import { createCanvas, loadImage } from "canvas"; // 🆕 Added
+import { createCanvas, loadImage } from "canvas";
 import * as pdfjsLibRaw from "pdfjs-dist/legacy/build/pdf.js";
 import { fileURLToPath } from "url";
 
@@ -34,95 +34,7 @@ const designWidth = 2481;
 const designHeight = 3509;
 
 /* --------------------------------------------------
-   1️⃣ Region Detection (with OCR fallback for Johor)
--------------------------------------------------- */
-async function detectRegionHybrid(filePath, text) {
-  const t = text.toLowerCase().replace(/\s+/g, " ");
-
-  if (/air\s*selangor/.test(t)) return "Selangor";
-  if (/syarikat\s*air\s*melaka/.test(t) || /\bsamb\b/.test(t)) return "Melaka";
-  if (/syarikat\s*air\s*negeri\s*sembilan/.test(t) || /\bsains\b/.test(t))
-    return "Negeri-Sembilan";
-  if (/syarikat\s*air\s*darul\s*aman/.test(t) || /\bsada\b/.test(t))
-    return "Kedah";
-  if (
-    t.includes("ranhill saj") ||
-    t.includes("ranhill sdn") ||
-    t.includes("saj sdn") ||
-    t.includes("ranhill") ||
-    t.includes("saj") ||
-    t.includes("johor") ||
-    t.includes("darul ta'zim")
-  ) {
-    return "Johor";
-  }
-
-  console.log("🔎 Normal text scan failed → OCR header check for Johor...");
-  const base = path.basename(filePath, ".pdf");
-  const tmpHeader = path.join(debugDir, `${base}_header.png`);
-  const tmpPng = await pdfToPNG(filePath);
-
-  try {
-    const meta = await sharp(tmpPng).metadata();
-    const cropHeight = Math.min(400, Math.round(meta.height * 0.25));
-    await sharp(tmpPng)
-      .extract({ left: 0, top: 0, width: meta.width, height: cropHeight })
-      .toFile(tmpHeader);
-
-    const worker = await createWorker("eng");
-    const res = await worker.recognize(tmpHeader);
-    await worker.terminate();
-
-    const ocrText = res.data.text.toLowerCase();
-    if (
-      ocrText.includes("ranhill") ||
-      ocrText.includes("saj") ||
-      ocrText.includes("johor") ||
-      ocrText.includes("darul ta'zim")
-    ) {
-      console.log("📄 Header OCR detected Ranhill → Johor");
-      return "Johor";
-    }
-  } catch (err) {
-    console.warn("⚠️ Johor OCR fallback failed:", err.message);
-  }
-
-  return "unknown";
-}
-
-/* --------------------------------------------------
-   2️⃣ Extract text from PDF (fallback to OCR)
--------------------------------------------------- */
-async function extractPDFText(filePath) {
-  try {
-    const data = new Uint8Array(fs.readFileSync(filePath));
-    const pdf = await pdfjsLib.getDocument({ data }).promise;
-    let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(i => i.str).join(" ") + "\n";
-    }
-    if (text.trim().length < 100) text = await runOCRText(filePath);
-    return text;
-  } catch {
-    return await runOCRText(filePath);
-  }
-}
-
-/* --------------------------------------------------
-   3️⃣ OCR fallback
--------------------------------------------------- */
-async function runOCRText(pdfPath) {
-  const png = await pdfToPNG(pdfPath);
-  const worker = await createWorker("eng");
-  const result = await worker.recognize(png);
-  await worker.terminate();
-  return result.data.text;
-}
-
-/* --------------------------------------------------
-   4️⃣ Convert PDF → Normalized PNG (2481x3509)
+   🧩 PDF → PNG Conversion
 -------------------------------------------------- */
 async function pdfToPNG(pdfPath) {
   const base = path.basename(pdfPath, ".pdf");
@@ -151,12 +63,13 @@ async function pdfToPNG(pdfPath) {
 }
 
 /* --------------------------------------------------
-   5️⃣ Cleaners
+   🧩 Cleaning Helpers
 -------------------------------------------------- */
 function cleanNumeric(v) {
   if (!v) return "";
   return v.replace(/rm\s*/gi, "").replace(/[^\d.,]/g, "").replace(/,+/g, "").trim();
 }
+
 function cleanAddress(text) {
   if (!text) return "";
   let lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
@@ -166,6 +79,7 @@ function cleanAddress(text) {
   if (idx !== -1) lines = lines.slice(0, idx + 1);
   return lines.join("\n");
 }
+
 function countAddressLines(t) {
   if (!t) return 6;
   const lines = t.split(/\n+/).map(l => l.trim()).filter(l => l.length > 0);
@@ -174,7 +88,48 @@ function countAddressLines(t) {
 }
 
 /* --------------------------------------------------
-   6️⃣ Detect Selangor Layout (Baharu / Baharu + Lama)
+   🧩 Extract Text from PDF (fallback to OCR)
+-------------------------------------------------- */
+async function extractPDFText(filePath) {
+  try {
+    const data = new Uint8Array(fs.readFileSync(filePath));
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    let text = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(i => i.str).join(" ") + "\n";
+    }
+    if (text.trim().length < 100) text = await runOCRText(filePath);
+    return text;
+  } catch {
+    return await runOCRText(filePath);
+  }
+}
+
+async function runOCRText(pdfPath) {
+  const png = await pdfToPNG(pdfPath);
+  const worker = await createWorker("eng");
+  const result = await worker.recognize(png);
+  await worker.terminate();
+  return result.data.text;
+}
+
+/* --------------------------------------------------
+   🧩 Region Detection
+-------------------------------------------------- */
+async function detectRegionHybrid(filePath, text) {
+  const t = text.toLowerCase().replace(/\s+/g, " ");
+  if (/air\s*selangor/.test(t)) return "Selangor";
+  if (/syarikat\s*air\s*melaka/.test(t) || /\bsamb\b/.test(t)) return "Melaka";
+  if (/syarikat\s*air\s*negeri\s*sembilan/.test(t) || /\bsains\b/.test(t)) return "Negeri-Sembilan";
+  if (/syarikat\s*air\s*darul\s*aman/.test(t) || /\bsada\b/.test(t)) return "Kedah";
+  if (/ranhill|saj|johor/.test(t)) return "Johor";
+  return "unknown";
+}
+
+/* --------------------------------------------------
+   🧩 Selangor Layout (Baharu / Lama)
 -------------------------------------------------- */
 async function detectSelangorLayout(region, imagePath) {
   if (region !== "Selangor") return region;
@@ -190,24 +145,16 @@ async function detectSelangorLayout(region, imagePath) {
   const ocr = res.data.text.toLowerCase();
   console.log("🔎 OCR detected header:", JSON.stringify(ocr));
 
-  if (ocr.includes("baharu") && ocr.includes("lama")) {
-    console.log("📄 Detected dual account (Baharu + Lama) → Selangor2.json");
-    return "Selangor2";
-  }
-  if (ocr.includes("baharu")) {
-    console.log("📄 Detected normal account (Baharu only) → Selangor.json");
-    return "Selangor";
-  }
-  console.log("⚠️ Defaulting → Selangor.json");
+  if (ocr.includes("baharu") && ocr.includes("lama")) return "Selangor2";
+  if (ocr.includes("baharu")) return "Selangor";
   return "Selangor";
 }
 
 /* --------------------------------------------------
-   🧭 Johor Post-Processing Parser (Final Enhanced)
+   🧩 Regional Field Parsers
 -------------------------------------------------- */
 function parseJohorFields(r) {
   const result = {};
-  // Example: Johor bills often have combined “Tunggakan dan Tarikh Section”
   const tSection = r["Tunggakan dan Tarikh Section"] || "";
   const dateMatch = tSection.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
   const tunggakanMatch = tSection.match(/(\d+[.,]\d{2})/);
@@ -215,7 +162,6 @@ function parseJohorFields(r) {
   if (dateMatch) result["Tunggakan Tarikh"] = dateMatch[1];
   if (tunggakanMatch) result["Tunggakan"] = tunggakanMatch[1];
 
-  // Extract tempoh bil from combined section
   const tempoh = tSection.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{4})/);
   if (tempoh) {
     result["Tempoh Bil"] = `${tempoh[1]} - ${tempoh[2]}`;
@@ -224,28 +170,18 @@ function parseJohorFields(r) {
     result["Bilangan Hari"] = Math.abs(Math.round((d2 - d1) / 86400000)).toString();
   }
 
-  // Caj and deposit parsing
   if (r["Jumlah Bil Semasa Section"])
     result["Jumlah Bil Semasa"] = r["Jumlah Bil Semasa Section"].match(/(\d+[.,]\d{2})/)?.[1] || "";
-
   result["Jumlah Caj Air Semasa"] = r["Jumlah Caj Air Semasa Section"]?.match(/(\d+[.,]\d{2})/)?.[1] || "";
   result["Deposit"] = r["Deposit"]?.match(/(\d+[.,]\d{2})/)?.[1] || "";
-
-  // No. Meter, Penggunaan
   result["No. Meter"] = r["No Meter, Tarikh, Penggunaan(m3) Section"]?.match(/[A-Z0-9]{5,}/)?.[0] || "";
   result["Penggunaan (m3)"] = r["No Meter, Tarikh, Penggunaan(m3) Section"]?.match(/(\d+)/)?.[1] || "";
-
-  // Tarikh (main billing date)
   result["Tarikh"] = r["Tarikh"] || "";
-
   return result;
 }
 
-/* --------------------------------------------------
-   💧 Kedah Parser (SADA) — clean + ordered + formatted
--------------------------------------------------- */
 function parseKedahFields(r, fileName) {
-  const cleaned = {
+  return {
     "File Name": fileName,
     Region: "Kedah",
     "No. Akaun": r["No. Akaun"] || "",
@@ -258,14 +194,10 @@ function parseKedahFields(r, fileName) {
     "Jumlah Perlu Dibayar": r["Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section"]?.match(/Perlu Dibayar\s*:\s*(\d+[.,]\d{2})/)?.[1] || "",
     Cagaran: r["Cagaran"] || ""
   };
-  return cleaned;
 }
 
-/* --------------------------------------------------
-   💧 Negeri Sembilan Parser (SAINS) — clean + ordered + formatted
--------------------------------------------------- */
 function parseNegeriSembilanFields(r) {
-  const parsed = {
+  return {
     "No. Akaun": r["No. Akaun"] || "",
     "No. Bil": r["No. Bil"] || "",
     Tarikh: r["Tarikh"] || "",
@@ -276,7 +208,6 @@ function parseNegeriSembilanFields(r) {
     Deposit: r["Deposit"] || "",
     "Jumlah Perlu Dibayar": r["Jumlah Perlu Dibayar"] || ""
   };
-  return parsed;
 }
 
 /* --------------------------------------------------
@@ -303,12 +234,10 @@ function standardizeOutput(obj) {
   return out;
 }
 
-
-
 /* --------------------------------------------------
-   7️⃣ Process Template OCR (updated to include Johor parser)
+   🧩 Main Template OCR (with Canvas overlay)
 -------------------------------------------------- */
-async function processTemplateOCR(imagePath, template, fileName, region) {
+export async function processTemplateOCR(imagePath, template, fileName, region) {
   const meta = await sharp(imagePath).metadata();
   const scaleX = meta.width / designWidth;
   const scaleY = meta.height / designHeight;
@@ -334,7 +263,6 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
 
   const addressLines = countAddressLines(addressText);
   const offsetY = -(6 - addressLines) * 50;
-
   const moveKeys = [
     "No. Meter",
     "Bilangan Hari - Start",
@@ -375,7 +303,7 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
 
   await worker.terminate();
 
-  // 🖍️ Draw overlay boxes using Canvas (Render-compatible)
+  // 🖍️ Canvas-based overlay drawing
   const baseImage = await loadImage(imagePath);
   const canvas = createCanvas(meta.width, meta.height);
   const ctx = canvas.getContext("2d");
@@ -395,7 +323,7 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
   stream.pipe(out);
   out.on("finish", () => console.log(`🖼️ Saved debug overlay → ${outOverlay}`));
 
-  /* -------------- Billing Date logic -------------- */
+  // 🧮 Tempoh Bil
   const norm = d => {
     const m = d?.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
     if (!m) return null;
@@ -425,7 +353,7 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
     ...(bilDays ? { "Bilangan Hari": bilDays } : {})
   };
 
-  // 🧭 Apply region-specific parsing
+  // 🧭 Region-specific normalization
   if (region.toLowerCase().includes("johor")) {
     const parsed = parseJohorFields(results);
     final = { ...final, ...parsed };
@@ -438,14 +366,12 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
     final = { ...parseNegeriSembilanFields(results), "File Name": fileName, Region: region };
   }
 
-  // Cleanups for Kedah
   if (region.toLowerCase().includes("kedah")) {
     delete final["Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section"];
     delete final["Address Lines Count"];
     delete final["Offset Applied (px)"];
   }
 
-  // Normalize account/bill numbers
   if (final["No. Bil"])
     final["No. Bil"] = final["No. Bil"].replace(/\s+/g, "").replace(/[^A-Za-z0-9\-]/g, "");
   if (final["No. Akaun"])
@@ -458,49 +384,7 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
 }
 
 /* --------------------------------------------------
-   8️⃣ Main Runner
--------------------------------------------------- */
-// (async () => {
-//   const pdfs = fs.readdirSync(billsDir).filter(f => f.endsWith(".pdf"));
-//   console.log(`📦 Found ${pdfs.length} bills in ${billsDir}\n`);
-
-//   for (const file of pdfs) {
-//     console.log(`🧾 Processing: ${file} ...`);
-//     const pdfPath = path.join(billsDir, file);
-//     const text = await extractPDFText(pdfPath);
-
-//     // const debugTextPath = path.join(outputDir, `${path.basename(file, ".pdf")}_fulltext.json`);
-//     // fs.writeFileSync(debugTextPath, JSON.stringify({ File: file, FullText: text }, null, 2));
-//     // console.log(`🪶 Full OCR text saved → ${debugTextPath}`);
-
-//     const region = await detectRegionHybrid(pdfPath, text);
-//     if (region === "unknown") {
-//       console.warn(`⚠️ Unknown region → skipping ${file}`);
-//       continue;
-//     }
-
-//     const png = await pdfToPNG(pdfPath);
-//     let imageToUse = png;
-//     // if (region === "Johor") {
-//     //   imageToUse = await makeBlackWhiteJohor(png);
-//     // }
-
-//     const regionChecked = await detectSelangorLayout(region, imageToUse);
-
-//     const templatePath = path.join(templatesDir, `${regionChecked}.json`);
-//     if (!fs.existsSync(templatePath))
-//       fs.writeFileSync(templatePath, JSON.stringify({}, null, 2));
-
-//     const template = JSON.parse(fs.readFileSync(templatePath, "utf8"));
-//     await processTemplateOCR(imageToUse, template, file, regionChecked);
-//     console.log(`✅ Completed ${file}\n`);
-//   }
-
-//   console.log("🎉 All water bills processed successfully!");
-// })();
-
-/* --------------------------------------------------
-   🧩 Main Extractor (for API)
+   🧩 API Entrypoint
 -------------------------------------------------- */
 export async function extractWaterBill(filePath, originalName = "") {
   console.log(`🧾 Processing single file via API: ${filePath} ...`);
@@ -526,20 +410,4 @@ export async function extractWaterBill(filePath, originalName = "") {
     console.warn(`⚠️ Output JSON not found for ${fileName}`);
     return { error: "No output generated" };
   }
-}
-
-// ✅ CLI mode: only runs if executed directly (not imported by server.js)
-if (import.meta.url === `file://${process.argv[1]}`) {
-  (async () => {
-    const pdfs = fs.readdirSync(billsDir).filter(f => f.endsWith(".pdf"));
-    console.log(`📦 Found ${pdfs.length} bills in ${billsDir}\n`);
-
-    for (const file of pdfs) {
-      console.log(`🧾 Processing: ${file} ...`);
-      const pdfPath = path.join(billsDir, file);
-      await extractWaterBill(pdfPath);
-    }
-
-    console.log("🎉 All water bills processed successfully!");
-  })();
 }
