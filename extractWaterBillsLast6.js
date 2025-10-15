@@ -481,6 +481,7 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
   const meta = await sharp(imagePath).metadata();
   const scaleX = meta.width / designWidth;
   const scaleY = meta.height / designHeight;
+  const renderYOffsetFix = process.env.RENDER ? 200 : 0;
   const worker = await createWorker("eng");
   const results = {};
 
@@ -547,9 +548,12 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
   const overlaySvg = `<svg width="${meta.width}" height="${meta.height}">${svgRects.join(
     "\n"
   )}</svg>`;
+  const overlayPath = imagePath.replace(".png", "_overlay.png");
   await sharp(imagePath)
     .composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }])
-    .toFile(imagePath.replace(".png", "_overlay.png"));
+    // .toFile(imagePath.replace(".png", "_overlay.png"));
+    .toFile(overlayPath);
+    console.log(`🖼️ Saved debug overlay → ${overlayPath}`);
 
   const norm = d => {
     const m = d?.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
