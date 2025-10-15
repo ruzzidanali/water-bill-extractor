@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
+import { execSync } from "child_process";
 import { createWorker } from "tesseract.js";
 import { fileURLToPath } from "url";
 import { createCanvas } from "canvas";
@@ -9,17 +10,21 @@ import pdfjsLibRaw from "pdfjs-dist/legacy/build/pdf.js"; // ✅ legacy build
 // ✅ Safe single declaration for pdfjsLib and getDocument
 const pdfjsLib = pdfjsLibRaw.default ?? pdfjsLibRaw;
 const { getDocument } = pdfjsLib;
+if (pdfjsLib.GlobalWorkerOptions) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = null;
+  pdfjsLib.disableWorker = true;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ✅ Worker path fix
-if (pdfjsLib.GlobalWorkerOptions) {
-  const workerPath = path
-    .resolve(__dirname, "../node_modules/pdfjs-dist/legacy/build/pdf.worker.js")
-    .replace(/\\/g, "/");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = workerPath;
-}
+// if (pdfjsLib.GlobalWorkerOptions) {
+//   const workerPath = path
+//     .resolve(__dirname, "../node_modules/pdfjs-dist/legacy/build/pdf.worker.js")
+//     .replace(/\\/g, "/");
+//   pdfjsLib.GlobalWorkerOptions.workerSrc = workerPath;
+// }
 
 // 📂 Folder setup
 const billsDir = path.join(__dirname, "04 Water Bills");
@@ -159,31 +164,18 @@ async function runOCRText(pdfPath) {
 
 async function pdfToPNG(pdfPath) {
   const base = path.basename(pdfPath, ".pdf");
-  const outPath = path.join(debugDir, `${base}.png`);
-
+  const outPrefix = path.join(debugDir, base);
+  const pngPath = `${outPrefix}.png`;
   try {
-    const data = new Uint8Array(fs.readFileSync(pdfPath));
-    const pdf = await getDocument({ data }).promise;
-    const page = await pdf.getPage(1);
-
-    const viewport = page.getViewport({ scale: 3.0 }); // ~300 DPI
-    const canvas = createCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext("2d");
-
-    await page.render({ canvasContext: context, viewport }).promise;
-
-    // normalize to design dimensions
-    const buffer = canvas.toBuffer("image/png");
-    await sharp(buffer)
+    execSync(`pdftoppm -r 300 -singlefile -png "${pdfPath}" "${outPrefix}"`);
+    await sharp(pngPath)
       .resize(designWidth, designHeight)
-      .toFile(outPath);
-
-    console.log(`🖼️  Generated PNG → ${outPath}`);
+      .toFile(pngPath);
+    console.log(`🖼️ Generated PNG → ${pngPath}`);
   } catch (err) {
-    console.error("❌ PDF→PNG (JS) failed:", err.message);
+    console.error("❌ PDF→PNG conversion failed:", err.message);
   }
-
-  return outPath;
+  return pngPath;
 }
 
 /* --------------------------------------------------
