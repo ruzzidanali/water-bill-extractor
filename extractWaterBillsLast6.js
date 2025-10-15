@@ -3,6 +3,7 @@ import path from "path";
 import { execSync } from "child_process";
 import sharp from "sharp";
 import { createWorker } from "tesseract.js";
+import { createCanvas, loadImage } from "canvas"; // 🆕 Added
 import * as pdfjsLibRaw from "pdfjs-dist/legacy/build/pdf.js";
 import { fileURLToPath } from "url";
 
@@ -31,25 +32,6 @@ for (const d of [outputDir, debugDir, cropsDir, templatesDir])
 // 🧾 Design dimensions
 const designWidth = 2481;
 const designHeight = 3509;
-
-/* --------------------------------------------------
-   🖤 Helper: Create Black & White version (for Johor)
--------------------------------------------------- */
-// async function makeBlackWhiteJohor(pngPath) {
-//   const grayPath = pngPath.replace(".png", "_gray.png");
-//   try {
-//     await sharp(pngPath)
-//       .grayscale()
-//       .linear(1.3, -20)
-//       .modulate({ brightness: 1.05, contrast: 1.2 })
-//       .normalize()
-//       .toFile(grayPath);
-//     console.log(`🩶 Grayscale version generated for Johor → ${grayPath}`);
-//   } catch (err) {
-//     console.warn("⚠️ Failed to generate grayscale version:", err.message);
-//   }
-//   return grayPath;
-// }
 
 /* --------------------------------------------------
    1️⃣ Region Detection (with OCR fallback for Johor)
@@ -149,16 +131,13 @@ async function pdfToPNG(pdfPath) {
   const resizedPngPath = `${outPrefix}.png`;
 
   try {
-    // 🖼️ Convert PDF → PNG using pdftoppm
     execSync(
       `pdftoppm -r 300 -singlefile -png "${pdfPath.replace(/\\/g, "/")}" "${outPrefix.replace(/\\/g, "/")}_raw"`
     );
 
-    // 🧾 Log actual Render image dimensions
     const meta = await sharp(rawPngPath).metadata();
     console.log("🧾 Render PDF image dimensions:", meta.width, "x", meta.height);
 
-    // 🪄 Resize to standard canvas (so template coordinates match)
     await sharp(rawPngPath)
       .resize(designWidth, designHeight, { fit: "fill" })
       .toFile(resizedPngPath);
@@ -226,258 +205,102 @@ async function detectSelangorLayout(region, imagePath) {
 /* --------------------------------------------------
    🧭 Johor Post-Processing Parser (Final Enhanced)
 -------------------------------------------------- */
-function parseJohorFields(results) {
-  const out = {};
+function parseJohorFields(r) {
+  const result = {};
+  // Example: Johor bills often have combined “Tunggakan dan Tarikh Section”
+  const tSection = r["Tunggakan dan Tarikh Section"] || "";
+  const dateMatch = tSection.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+  const tunggakanMatch = tSection.match(/(\d+[.,]\d{2})/);
 
-  // 🧾 Deposit
-  const depositRaw = results["Deposit"];
-  if (depositRaw) {
-    const match = depositRaw.match(/(\d+(?:[.,]\d{1,2})?)/);
-    out["Deposit"] = match ? match[1].replace(",", ".") : "0.00";
-  } else {
-    out["Deposit"] = "0.00";
+  if (dateMatch) result["Tunggakan Tarikh"] = dateMatch[1];
+  if (tunggakanMatch) result["Tunggakan"] = tunggakanMatch[1];
+
+  // Extract tempoh bil from combined section
+  const tempoh = tSection.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{4})/);
+  if (tempoh) {
+    result["Tempoh Bil"] = `${tempoh[1]} - ${tempoh[2]}`;
+    const d1 = new Date(tempoh[1].split("/").reverse().join("-"));
+    const d2 = new Date(tempoh[2].split("/").reverse().join("-"));
+    result["Bilangan Hari"] = Math.abs(Math.round((d2 - d1) / 86400000)).toString();
   }
 
-  // 🧾 Tunggakan Section (handle stamps, dates, values)
-  const tunggakanRaw = results["Tunggakan dan Tarikh Section"];
-  if (tunggakanRaw) {
-    // Match the numeric value at the end, ignoring stamp text like PVU3208/2506216
-    const tunggakanMatch = tunggakanRaw.match(
-      /TUNGGAKAN(?:\s+\d{2}\/\d{2}\/\d{2,4})?(?:\s+[A-Z0-9\/]+)?\s+([0-9]+(?:[.,][0-9]{1,2})?)/i
-    );
-    out["Tunggakan"] = tunggakanMatch
-      ? tunggakanMatch[1].replace(",", ".")
-      : "0.00";
+  // Caj and deposit parsing
+  if (r["Jumlah Bil Semasa Section"])
+    result["Jumlah Bil Semasa"] = r["Jumlah Bil Semasa Section"].match(/(\d+[.,]\d{2})/)?.[1] || "";
 
-    // Extract Tarikh (e.g. from "JUMLAH BIL SEMASA 15/07/2025")
-    const dateMatch = tunggakanRaw.match(
-      /JUMLAH\s+BIL\s+SEMASA\s+(\d{2})[\/\-]?(\d{2})[\/\-]?(\d{4})/i
-    );
-    if (dateMatch)
-      out["Tarikh"] = `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}`;
-  } else {
-    out["Tunggakan"] = "0.00";
-  }
+  result["Jumlah Caj Air Semasa"] = r["Jumlah Caj Air Semasa Section"]?.match(/(\d+[.,]\d{2})/)?.[1] || "";
+  result["Deposit"] = r["Deposit"]?.match(/(\d+[.,]\d{2})/)?.[1] || "";
 
-  // 🧾 Jumlah Bil Semasa
-  const jumlahBilRaw = results["Jumlah Bil Semasa Section"];
-  if (jumlahBilRaw) {
-    const match = jumlahBilRaw.match(
-      /JUMLAH\s+BIL\s+SEMASA[^0-9]*([0-9]+(?:[.,][0-9]{1,2})?)/i
-    );
-    out["Jumlah Bil Semasa"] = match ? match[1].replace(",", ".") : "";
-  }
+  // No. Meter, Penggunaan
+  result["No. Meter"] = r["No Meter, Tarikh, Penggunaan(m3) Section"]?.match(/[A-Z0-9]{5,}/)?.[0] || "";
+  result["Penggunaan (m3)"] = r["No Meter, Tarikh, Penggunaan(m3) Section"]?.match(/(\d+)/)?.[1] || "";
 
-  // 🧾 Normalize No. Bil — remove all spaces and stray non-alphanumerics
-  out["No. Bil"] = (results["No. Bil"] || "")
-    .replace(/\s+/g, "")
-    .replace(/[^A-Za-z0-9\-]/g, "");
+  // Tarikh (main billing date)
+  result["Tarikh"] = r["Tarikh"] || "";
 
-  // 🧾 Normalize No. Akaun — remove extra spaces but keep dash
-  out["No. Akaun"] = (results["No. Akaun"] || "")
-    .replace(/\s+/g, "")
-    .replace(/[^A-Za-z0-9\-]/g, "");
-
-
-  // 🧾 Meter / Penggunaan / Tarikh Start-End
-  const meterRaw = results["No Meter, Tarikh, Penggunaan(m3) Section"];
-  if (meterRaw) {
-    // Extract meter number (remove spaces in between)
-    const meterMatch = meterRaw.match(/(SAJ[0-9A-Z\s]+)/i);
-    out["No. Meter"] = meterMatch
-      ? meterMatch[1].replace(/\s+/g, "")
-      : "";
-
-    // Extract correct Penggunaan (last number on same line as meter)
-    const meterLine = meterRaw.split("\n").find(l => l.includes("SAJ"));
-    const usageMatch = meterLine?.match(/(\d{1,4}\.\d{1,2})\s*$/);
-    out["Penggunaan (m3)"] = usageMatch
-      ? usageMatch[1].replace(",", ".")
-      : "";
-
-    // Extract start/end dates
-    const dateMatches = meterRaw.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})/g);
-    if (dateMatches && dateMatches.length >= 2) {
-      out["Bilangan Hari - End"] = dateMatches[0];
-      out["Bilangan Hari - Start"] = dateMatches[1];
-      out["Tempoh Bil"] = `${out["Bilangan Hari - Start"]} - ${out["Bilangan Hari - End"]}`;
-      const d1 = new Date(out["Bilangan Hari - Start"].split("/").reverse().join("-"));
-      const d2 = new Date(out["Bilangan Hari - End"].split("/").reverse().join("-"));
-      out["Bilangan Hari"] = Math.abs(Math.round((d2 - d1) / 86400000)).toString();
-    }
-  }
-
-  // 🧾 Jumlah Caj Air Semasa
-  const cajRaw = results["Jumlah Caj Air Semasa Section"];
-  if (cajRaw) {
-    const match = cajRaw.match(
-      /JUMLAH\s+CAJ\s+AIR\s+SEMASA[^0-9]*([0-9]+(?:[.,][0-9]{1,2})?)/i
-    );
-    out["Jumlah Caj Air Semasa"] = match
-      ? match[1].replace(",", ".")
-      : "";
-  }
-
-  // If no value found, fallback to Jumlah Bil Semasa
-  if (!out["Jumlah Caj Air Semasa"])
-    out["Jumlah Caj Air Semasa"] = out["Jumlah Bil Semasa"] || "0.00";
-
-  return out;
+  return result;
 }
 
 /* --------------------------------------------------
    💧 Kedah Parser (SADA) — clean + ordered + formatted
 -------------------------------------------------- */
-function parseKedahFields(results, fileName) {
-  const section =
-    results[
-      "Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section"
-    ] || "";
-
-  // 🧾 Helper: extract numeric RM values
-  const getValue = (label) => {
-    const regex = new RegExp(
-      label + "\\s*:\\s*RM\\s*([0-9]+(?:[.,][0-9]{1,2})?)",
-      "i"
-    );
-    const match = section.match(regex);
-    return match ? match[1].replace(",", ".") : "0.00";
-  };
-
-  // 🧾 Build clean structured output in your desired order
-  return {
+function parseKedahFields(r, fileName) {
+  const cleaned = {
     "File Name": fileName,
-    "Region": "Kedah",
-
-    // ---- Ordered fields ----
-    "Nombor Akaun": results["No. Akaun"] || "",
-    "No. Invois": results["No. Bil"] || "",
-    "Tarikh": results["Tarikh"] || "",
-    "Tempoh Bil": results["Tempoh Bil"] || "",
-    "Nombor Meter": results["No. Meter"] || "",
-    "Penggunaan Semasa": results["Penggunaan Semasa"] || "",
-    "Jumlah Caj Semasa": getValue("JUMLAH CAJ SEMASA"),
-    "Jumlah Tunggakan": getValue("JUMLAH TUNGGAKAN"),
-    "Jumlah Perlu Dibayar": getValue("JUMLAH PERLU DIBAYAR"),
-    "Cagaran": results["Cagaran"] || "0.00"
+    Region: "Kedah",
+    "No. Akaun": r["No. Akaun"] || "",
+    "No. Bil": r["No. Bil"] || "",
+    Tarikh: r["Tarikh"] || "",
+    "No. Meter": r["No. Meter"] || "",
+    "Penggunaan Semasa": r["Penggunaan Semasa"] || "",
+    "Jumlah Caj Semasa": r["Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section"]?.match(/(\d+[.,]\d{2})/)?.[1] || "",
+    "Jumlah Tunggakan": r["Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section"]?.match(/Tunggakan\s*:\s*(\d+[.,]\d{2})/)?.[1] || "",
+    "Jumlah Perlu Dibayar": r["Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section"]?.match(/Perlu Dibayar\s*:\s*(\d+[.,]\d{2})/)?.[1] || "",
+    Cagaran: r["Cagaran"] || ""
   };
+  return cleaned;
 }
 
 /* --------------------------------------------------
    💧 Negeri Sembilan Parser (SAINS) — clean + ordered + formatted
 -------------------------------------------------- */
-function parseNegeriSembilanFields(results) {
-  const out = {};
-
-  // 🧾 Basic fields
-  out["No. Akaun"] = results["No. Akaun"] || "";
-  out["No. Invois"] = results["No. Bil"] || "";
-
-  // 🗓️ Normalize Tarikh (e.g. 09-08-2025 → 09/08/2025)
-  if (results["Tarikh"]) {
-    const norm = results["Tarikh"].replace(/-/g, "/").trim();
-    out["Tarikh"] = norm;
-  } else {
-    out["Tarikh"] = "";
-  }
-
-  // 🧮 Extract tempoh bil + bilangan hari from "Bilangan Hari Section"
-  const section = results["Bilangan Hari Section"] || "";
-  const dateMatches = section.match(/(\d{2})[-\/](\d{2})[-\/](\d{4}).*?(\d{2})[-\/](\d{2})[-\/](\d{4})/);
-  if (dateMatches) {
-    const start = `${dateMatches[1]}/${dateMatches[2]}/${dateMatches[3]}`;
-    const end = `${dateMatches[4]}/${dateMatches[5]}/${dateMatches[6]}`;
-    const d1 = new Date(`${dateMatches[3]}-${dateMatches[2]}-${dateMatches[1]}`);
-    const d2 = new Date(`${dateMatches[6]}-${dateMatches[5]}-${dateMatches[4]}`);
-    const days = Math.abs(Math.round((d2 - d1) / 86400000));
-    out["Tempoh Bil"] = `${start} - ${end}`;
-    out["Bilangan Hari"] = days.toString();
-  } else {
-    out["Tempoh Bil"] = "";
-    out["Bilangan Hari"] = "";
-  }
-
-  // 🔢 Clean Penggunaan
-  if (results["Penggunaan"]) {
-    const match = results["Penggunaan"].match(/(\d+(?:[.,]\d+)?)/);
-    out["Penggunaan"] = match ? match[1].replace(",", ".") : "0";
-  } else {
-    out["Penggunaan"] = "0";
-  }
-
-  // 💰 Clean Deposit (remove RM)
-  if (results["Deposit"]) {
-    const match = results["Deposit"].match(/([0-9]+(?:[.,][0-9]{1,2})?)/);
-    out["Deposit"] = match ? match[1].replace(",", ".") : "0.00";
-  } else {
-    out["Deposit"] = "0.00";
-  }
-
-  // 💧 Remaining fields
-  out["No. Meter"] = results["No. Meter"] || "";
-  out["Caj Semasa"] = results["Caj Semasa"] || "0.00";
-  out["Tunggakan"] = results["Tunggakan"] || "0.00";
-  out["Jumlah Perlu Dibayar"] = results["Jumlah Perlu Dibayar"] || "0.00";
-
-  return out;
+function parseNegeriSembilanFields(r) {
+  const parsed = {
+    "No. Akaun": r["No. Akaun"] || "",
+    "No. Bil": r["No. Bil"] || "",
+    Tarikh: r["Tarikh"] || "",
+    "No. Meter": r["No. Meter"] || "",
+    Penggunaan: r["Penggunaan"] || "",
+    "Caj Semasa": r["Caj Semasa"] || "",
+    Tunggakan: r["Tunggakan"] || "",
+    Deposit: r["Deposit"] || "",
+    "Jumlah Perlu Dibayar": r["Jumlah Perlu Dibayar"] || ""
+  };
+  return parsed;
 }
 
-function standardizeOutput(data) {
-  // helper to safely get a numeric string with two decimals
-  const cleanNum = v => (v ? v.toString().replace(/[^\d.,-]/g, "").replace(",", ".") : "0.00");
-
-  return {
-    File_Name: data["File Name"] || data["File_Name"] || "",
-    Region: data["Region"] || "",
-    No_Invois:
-      data["No. Invois"] ||
-      data["No. Bil"] ||
-      data["No_Invois"] ||
-      data["No_Bil"] ||
-      "",
-    No_Akaun:
-      data["No. Akaun"] ||
-      data["Nombor Akaun"] ||
-      data["Nombor_Akaun"] ||
-      "",
-    Tarikh: (data["Tarikh"] || "").replace(/-/g, "/").trim(),
-    Tempoh_Bil:
-      data["Tempoh Bil"] ||
-      data["Tempoh_Bil"] ||
-      "",
-    Bilangan_Hari:
-      data["Bilangan Hari"] ||
-      data["Bilangan_Hari"] ||
-      "",
-    No_Meter:
-      data["No. Meter"] ||
-      data["Nombor Meter"] ||
-      data["Nombor_Meter"] ||
-      "",
-    Penggunaan:
-      data["Penggunaan"] ||
-      data["Penggunaan (m3)"] ||
-      data["Penggunaan Semasa"] ||
-      "0",
-    Caj_Semasa:
-      data["Caj Semasa"] ||
-      data["Jumlah Bil Semasa"] ||
-      data["Jumlah Caj Semasa"] ||
-      data["Jumlah Caj Air Semasa"] ||
-      cleanNum(data["Bil Semasa"]),
-    Tunggakan:
-      data["Tunggakan"] ||
-      data["Jumlah Tunggakan"] ||
-      "0.00",
-    Jumlah_Perlu_Dibayar:
-      data["Jumlah Perlu Dibayar"] ||
-      data["Jumlah_Perlu_Dibayar"] ||
-      "0.00",
-    Deposit:
-      data["Deposit"] ||
-      data["Cagaran"] ||
-      "0.00"
+/* --------------------------------------------------
+   🧩 Standardized Output
+-------------------------------------------------- */
+function standardizeOutput(obj) {
+  const map = {
+    "No. Invois": "No_Invois",
+    "No. Akaun": "No_Akaun",
+    "Tarikh": "Tarikh",
+    "Tempoh Bil": "Tempoh_Bil",
+    "Bilangan Hari": "Bilangan_Hari",
+    "No. Meter": "No_Meter",
+    "Penggunaan (m3)": "Penggunaan",
+    "Caj Semasa": "Caj_Semasa",
+    "Jumlah Perlu Dibayar": "Jumlah_Perlu_Dibayar",
+    "Tunggakan": "Tunggakan",
+    "Deposit": "Deposit"
   };
+  const out = {};
+  for (const [k, v] of Object.entries(map)) out[v] = obj[k] || "";
+  out.File_Name = obj["File Name"] || "";
+  out.Region = obj["Region"] || "";
+  return out;
 }
 
 
@@ -489,10 +312,10 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
   const meta = await sharp(imagePath).metadata();
   const scaleX = meta.width / designWidth;
   const scaleY = meta.height / designHeight;
-  const renderYOffsetFix = process.env.RENDER ? 200 : 0;
   const worker = await createWorker("eng");
   const results = {};
 
+  // 🏠 Address handling
   let addressText = "";
   if (template["Address"]) {
     const b = template["Address"];
@@ -535,34 +358,44 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
     svgRects.push(
       `<rect x="${s.left}" y="${s.top}" width="${s.width}" height="${s.height}" fill="none" stroke="red" stroke-width="3"/>`
     );
+
     const crop = path.join(cropsDir, `${key.replace(/\s+/g, "_")}.png`);
     try {
       await sharp(imagePath).extract(s).toFile(crop);
       const r = await worker.recognize(crop);
       let text = r.data.text.trim();
-      if (
-        ["Bil Semasa", "Jumlah Perlu Dibayar", "Baki Terdahulu", "Cagaran", "Penggunaan (m3)"].includes(key)
-      )
+      if (["Bil Semasa", "Jumlah Perlu Dibayar", "Baki Terdahulu", "Cagaran", "Penggunaan (m3)"].includes(key))
         text = cleanNumeric(text);
       results[key] = text;
       console.log(`✂️ ${key}: ${results[key]}`);
-    } catch (e) {
+    } catch {
       results[key] = "";
     }
   }
 
   await worker.terminate();
 
-  const overlaySvg = `<svg width="${meta.width}" height="${meta.height}">${svgRects.join(
-    "\n"
-  )}</svg>`;
-  const overlayPath = imagePath.replace(".png", "_overlay.png");
-  await sharp(imagePath)
-    .composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }])
-    // .toFile(imagePath.replace(".png", "_overlay.png"));
-    .toFile(overlayPath);
-    console.log(`🖼️ Saved debug overlay → ${overlayPath}`);
+  // 🖍️ Draw overlay boxes using Canvas (Render-compatible)
+  const baseImage = await loadImage(imagePath);
+  const canvas = createCanvas(meta.width, meta.height);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(baseImage, 0, 0, meta.width, meta.height);
+  ctx.strokeStyle = "red";
+  ctx.lineWidth = 3;
+  svgRects.forEach(rect => {
+    const match = rect.match(/x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/);
+    if (match) {
+      const [, x, y, w, h] = match.map(Number);
+      ctx.strokeRect(x, y, w, h);
+    }
+  });
+  const outOverlay = imagePath.replace(".png", "_overlay.png");
+  const out = fs.createWriteStream(outOverlay);
+  const stream = canvas.createPNGStream();
+  stream.pipe(out);
+  out.on("finish", () => console.log(`🖼️ Saved debug overlay → ${outOverlay}`));
 
+  /* -------------- Billing Date logic -------------- */
   const norm = d => {
     const m = d?.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
     if (!m) return null;
@@ -592,75 +425,36 @@ async function processTemplateOCR(imagePath, template, fileName, region) {
     ...(bilDays ? { "Bilangan Hari": bilDays } : {})
   };
 
-  // 🧭 Apply Johor-specific parsing
+  // 🧭 Apply region-specific parsing
   if (region.toLowerCase().includes("johor")) {
     const parsed = parseJohorFields(results);
-    final = {
-      "File Name": fileName,
-      Region: region,
-      "No. Akaun": results["No. Akaun"] || "",
-      "No. Bil": results["No. Bil"] || "",
-      ...(parsed["Tarikh"] ? { Tarikh: parsed["Tarikh"] } : {}),
-      ...(parsed["Tunggakan Tarikh"] ? { "Tunggakan Tarikh": parsed["Tunggakan Tarikh"] } : {}),
-      ...(parsed["Tunggakan"] ? { Tunggakan: parsed["Tunggakan"] } : {}),
-      ...(parsed["Tempoh Bil"] ? { "Tempoh Bil": parsed["Tempoh Bil"] } : {}),
-      ...(parsed["Bilangan Hari"] ? { "Bilangan Hari": parsed["Bilangan Hari"] } : {}),
-      ...(parsed["No. Meter"] ? { "No. Meter": parsed["No. Meter"] } : {}),
-      ...(parsed["Penggunaan (m3)"] ? { "Penggunaan (m3)": parsed["Penggunaan (m3)"] } : {}),
-      ...(parsed["Jumlah Bil Semasa"] ? { "Jumlah Bil Semasa": parsed["Jumlah Bil Semasa"] } : {}),
-      ...(parsed["Deposit"] ? { Deposit: parsed["Deposit"] } : {}),
-      ...(parsed["Jumlah Caj Air Semasa"] ? { "Jumlah Caj Air Semasa": parsed["Jumlah Caj Air Semasa"] } : {})
-    };
+    final = { ...final, ...parsed };
   } else if (region.toLowerCase().includes("kedah")) {
-  const parsed = parseKedahFields(results, fileName);
-  
+    const parsed = parseKedahFields(results, fileName);
+    if (final["Tempoh Bil"]) parsed["Tempoh Bil"] = final["Tempoh Bil"];
+    if (final["Bilangan Hari"]) parsed["Bilangan Hari"] = final["Bilangan Hari"];
+    final = parsed;
+  } else if (region.toLowerCase().includes("negeri")) {
+    final = { ...parseNegeriSembilanFields(results), "File Name": fileName, Region: region };
+  }
 
-  // Preserve Tempoh Bil and Bilangan Hari from earlier detection
-  if (final["Tempoh Bil"]) parsed["Tempoh Bil"] = final["Tempoh Bil"];
-  if (final["Bilangan Hari"]) parsed["Bilangan Hari"] = final["Bilangan Hari"];
+  // Cleanups for Kedah
+  if (region.toLowerCase().includes("kedah")) {
+    delete final["Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section"];
+    delete final["Address Lines Count"];
+    delete final["Offset Applied (px)"];
+  }
 
-  // Merge the cleaned and ordered Kedah fields
-  final = parsed;
-} else if (region.toLowerCase().includes("negeri")) {
-  final = { 
-    ...parseNegeriSembilanFields(results),
-    "File Name": fileName,
-    "Region": region
-  };
-}
-
-if (region.toLowerCase().includes("kedah")) {
-  delete final["Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section"];
-  delete final["Address Lines Count"];
-  delete final["Offset Applied (px)"];
-  delete final["No. Bil"];
-  delete final["No. Akaun"];
-  delete final["No. Meter"];
-  delete final["Penggunaan Semasa"];
-}
-
-
-  const outJson = path.join(outputDir, `${path.basename(fileName, ".pdf")}_${region}.json`);
-  // 🧹 Normalize No. Akaun and No. Bil globally (remove spaces and stray chars)
-  if (final["No. Bil"]) {
+  // Normalize account/bill numbers
+  if (final["No. Bil"])
     final["No. Bil"] = final["No. Bil"].replace(/\s+/g, "").replace(/[^A-Za-z0-9\-]/g, "");
-  }
-  if (final["No. Akaun"]) {
+  if (final["No. Akaun"])
     final["No. Akaun"] = final["No. Akaun"].replace(/\s+/g, "").replace(/[^A-Za-z0-9\-]/g, "");
-  }
 
   const standardized = standardizeOutput(final);
-  // const outJson = path.join(outputDir, `${path.basename(fileName, ".pdf")}_${region}_STANDARD.json`);
+  const outJson = path.join(outputDir, `${path.basename(fileName, ".pdf")}_${region}.json`);
   fs.writeFileSync(outJson, JSON.stringify(standardized, null, 2));
   console.log(`✅ Standardized JSON saved → ${outJson}`);
-
-
-  // fs.writeFileSync(outJson, JSON.stringify(final, null, 2));
-  // console.log(`🧾 JSON saved → ${outJson}`);
-
-  // const debugBoxesPath = path.join(outputDir, `${path.basename(fileName, ".pdf")}_boxes.json`);
-  // fs.writeFileSync(debugBoxesPath, JSON.stringify(results, null, 2));
-  // console.log(`📦 Box OCR text saved → ${debugBoxesPath}`);
 }
 
 /* --------------------------------------------------
@@ -706,27 +500,19 @@ if (region.toLowerCase().includes("kedah")) {
 // })();
 
 /* --------------------------------------------------
-   8️⃣ Main Runner (supports both CLI & API)
+   🧩 Main Extractor (for API)
 -------------------------------------------------- */
-
-// ✅ Exported function for API
 export async function extractWaterBill(filePath, originalName = "") {
   console.log(`🧾 Processing single file via API: ${filePath} ...`);
   const fileName = originalName || path.basename(filePath);
   const text = await extractPDFText(filePath);
-
   const region = await detectRegionHybrid(filePath, text);
-  if (region === "unknown") {
-    console.warn(`⚠️ Unknown region → skipping ${filePath}`);
-    return { error: "Unknown region" };
-  }
+  if (region === "unknown") return { error: "Unknown region" };
 
   const png = await pdfToPNG(filePath);
   const regionChecked = await detectSelangorLayout(region, png);
-
   const templatePath = path.join(templatesDir, `${regionChecked}.json`);
-  if (!fs.existsSync(templatePath))
-    fs.writeFileSync(templatePath, JSON.stringify({}, null, 2));
+  if (!fs.existsSync(templatePath)) fs.writeFileSync(templatePath, "{}");
 
   const template = JSON.parse(fs.readFileSync(templatePath, "utf8"));
   await processTemplateOCR(png, template, fileName, regionChecked);
