@@ -6,7 +6,9 @@ import { createWorker } from "tesseract.js";
 import * as pdfjsLibRaw from "pdfjs-dist/legacy/build/pdf.js";
 import { fileURLToPath } from "url";
 import { createCanvas } from "canvas";
-import { getDocument } from "pdfjs-dist";
+import pdfjsLib from "pdfjs-dist";
+
+const { getDocument } = pdfjsLib;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
