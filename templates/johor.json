@@ -1,0 +1,9 @@
+{
+  "No. Akaun": { "x": 120, "y": 350, "w": 380, "h": 55 },
+  "No. Bil": { "x": 1880, "y": 350, "w": 140, "h": 55 },
+  "Deposit": { "x": 1880, "y": 500, "w": 400, "h": 160 },
+  "Tunggakan dan Tarikh Section": { "x": 120, "y": 710, "w": 2300, "h": 300 },
+  "Jumlah Bil Semasa Section": { "x": 120, "y": 1100, "w": 2300, "h": 600 },
+  "No Meter, Tarikh, Penggunaan(m3) Section": { "x": 120, "y": 1550, "w": 2300, "h": 450 },
+  "Jumlah Caj Air Semasa Section": { "x": 120, "y": 2530, "w": 2210, "h": 55 }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "pdfextractorapi",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "child_process": "^1.0.2",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "pdfjs-dist": "^3.10.111",
+    "sharp": "^0.34.4",
+    "tesseract.js": "^6.0.1"
+  }
+}

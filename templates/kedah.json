@@ -1,0 +1,11 @@
+{
+  "No. Akaun": { "x": 335, "y": 660, "w": 380, "h": 55 },
+  "No. Bil": { "x": 600, "y": 470, "w": 215, "h": 55 },
+  "Tarikh": { "x": 2100, "y": 470, "w": 300, "h": 55 },
+  "Bilangan Hari - End": { "x": 1700, "y": 1005, "w": 280, "h": 55 },
+  "Bilangan Hari - Start": { "x": 1700, "y": 950, "w": 280, "h": 55 },
+  "No. Meter": { "x": 120, "y": 1145, "w": 400, "h": 55 },
+  "Penggunaan Semasa": { "x": 1700, "y": 1145, "w": 280, "h": 55 },
+  "Jumlah Caj Semasa, Jumlah Tunggakan dan Jumlah Perlu Dibayar Section": { "x": 1000, "y": 1620, "w": 1360, "h": 680 },
+  "Cagaran": { "x": 2100, "y": 660, "w": 300, "h": 55 }
+}
